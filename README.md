@@ -63,7 +63,6 @@ dotnet publish RVCStudio/RVCStudio.csproj -c Release -r linux-x64 --self-contain
 
 Перетащите ZIP-архив модели в окно приложения или нажмите «Выбрать ZIP-файл». Архив должен содержать совместимую RVC generator-модель ONNX. Модели пользователя хранятся в `Models` рядом с приложением.
 
-Подробности о форматах и базовых моделях: [`RVCStudio/Models/README.md`](RVCStudio/Models/README.md). Голосовую модель пользователь предоставляет самостоятельно.
 
 ## Структура проекта
 
