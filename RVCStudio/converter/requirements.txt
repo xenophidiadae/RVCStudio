@@ -1,0 +1,9 @@
+torch>=2.4.0
+torchaudio>=2.4.0
+onnx>=1.16.0
+onnxruntime>=1.18.0
+onnxscript>=0.1.0
+ml_dtypes>=0.4.0
+numpy<2.0.0
+scipy>=1.10.0
+soundfile>=0.12.1
