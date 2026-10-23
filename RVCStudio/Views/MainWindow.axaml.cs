@@ -33,7 +33,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            viewModel.StatusMessage = $"Не удалось обработать перетаскивание файла: {ex.Message}";
+            viewModel.StatusMessage = $"Could not process dropped file: {ex.Message}";
         }
     }
 }

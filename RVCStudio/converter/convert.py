@@ -1,16 +1,104 @@
 import argparse
 import math
 import os
-import shutil
 import sys
 import tempfile
 import zipfile
 import torch
 import torch.nn as nn
+import struct
+import numpy as np
 from torch.nn import Conv1d, ConvTranspose1d
 from torch.nn.utils import remove_weight_norm, weight_norm
 
 from rvc_exporter.models import SynthesizerTrnMs768NSFsid, SynthesizerTrnMs768NSFsidONNX
+
+
+def prepare_index(source_path, output_path):
+    """Convert a standard FAISS RVC index to RVCI: IVF centroids + per-channel int8 residuals."""
+    import faiss
+
+    source = faiss.read_index(source_path)
+    if source.ntotal == 0 or source.d <= 0:
+        raise ValueError("FAISS index is empty or invalid")
+    if source.ntotal < 2:
+        raise ValueError("At least two vectors are required to build an IVF index")
+    d, n = source.d, source.ntotal
+    # RVC indices are often IndexIDMap( IndexIVFFlat ). Enable reconstruction
+    # for IVF storage when the wrapper does not provide a direct map.
+    base = faiss.downcast_index(source)
+    while hasattr(base, "index"):
+        base = faiss.downcast_index(base.index)
+    if hasattr(base, "make_direct_map"):
+        try:
+            base.make_direct_map()
+        except RuntimeError:
+            pass
+    vectors = np.empty((n, d), dtype=np.float32)
+    try:
+        # RVC's standard IndexIDMap stores its wrapped vector index here.
+        vectors[:] = source.index.reconstruct_n(0, n)
+    except (AttributeError, RuntimeError, TypeError):
+        # Some FAISS wrappers do not expose the inner index or range reconstruction.
+        for i in range(n):
+            vectors[i] = source.reconstruct(i)
+
+    # FAISS RVC indices commonly wrap IVF-Flat in IndexIDMap; recover IVF centroids
+    # when available, otherwise build a coarse quantizer with a bounded cluster count.
+    if hasattr(base, "nlist") and hasattr(base, "quantizer"):
+        nlist = int(base.nlist)
+        centroids = np.vstack([base.quantizer.reconstruct(i) for i in range(nlist)]).astype(np.float32)
+    else:
+        # Match the conventional RVC IVF sizing heuristic: enough lists to keep
+        # per-query candidate scans small, but never fewer than the training set supports.
+        nlist = min(max(1, int(16 * np.sqrt(n))), max(1, n // 39))
+        coarse = faiss.IndexFlatL2(d)
+        clustering = faiss.Clustering(d, nlist)
+        clustering.niter = 20
+        clustering.min_points_per_centroid = 1
+        clustering.train(vectors, coarse)
+        centroids = np.vstack([coarse.reconstruct(i) for i in range(nlist)]).astype(np.float32)
+
+    coarse = faiss.IndexFlatL2(d)
+    coarse.add(centroids)
+    _, assignments = coarse.search(vectors, 1)
+    assignments = assignments[:, 0]
+    # Remove empty centroids so every serialized IVF list is searchable and non-empty.
+    used = np.unique(assignments)
+    remap = np.full(nlist, -1, dtype=np.int64)
+    remap[used] = np.arange(len(used))
+    centroids = centroids[used]
+    nlist = len(used)
+    assignments = remap[assignments]
+    # Per-dimension symmetric int8 residual quantization minimizes quality loss
+    # while allowing simple SIMD dot products at runtime.
+    scales = np.zeros((nlist, d), dtype=np.float32)
+    order = np.argsort(assignments, kind="stable")
+    assignments = assignments[order]
+    vectors = vectors[order]
+    counts = np.bincount(assignments, minlength=nlist).astype(np.int32)
+    offsets = np.zeros(nlist + 1, dtype=np.int64)
+    offsets[1:] = np.cumsum(counts)
+    ordered = np.empty((n, d), dtype=np.int8)
+    for cluster in range(nlist):
+        first, last = offsets[cluster], offsets[cluster + 1]
+        if first == last:
+            continue
+        residuals = vectors[first:last] - centroids[cluster]
+        scales[cluster] = np.maximum(np.max(np.abs(residuals), axis=0) / 127.0, 1e-8)
+        quantized = np.clip(np.rint(residuals / scales[cluster]), -127, 127).astype(np.int8)
+        ordered[first:last] = quantized
+
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+    temp_path = output_path + ".tmp"
+    with open(temp_path, "wb") as out:
+        out.write(struct.pack("<4sIII", b"RVCI", d, nlist, n))
+        out.write(centroids.astype("<f4").tobytes())
+        out.write(scales.astype("<f4").tobytes())
+        out.write(offsets.astype("<i8").tobytes())
+        out.write(ordered.tobytes())
+    os.replace(temp_path, output_path)
+    print(f"[+] RVCI index: {n} vectors, {d} dims, {nlist} clusters, int8 residuals")
 
                                             
                                   
@@ -331,6 +419,9 @@ def convert_pth_to_onnx(pth_path, onnx_path):
 
 
 def main():
+    if len(sys.argv) == 4 and sys.argv[1] == "--prepare-index":
+        prepare_index(sys.argv[2], sys.argv[3])
+        return
     parser = argparse.ArgumentParser(
         description="Конвертер RVC zip в ONNX без зависимостей"
     )
@@ -380,9 +471,8 @@ def main():
         onnx_path = os.path.join(out_dir, f"{base_name}.onnx")
         if convert_pth_to_onnx(pth_files[0], onnx_path):
             if index_files:
-                dst_index = os.path.join(out_dir, os.path.basename(index_files[0]))
-                shutil.copy(index_files[0], dst_index)
-                print(f"[+] Найденный индекс скопирован: {dst_index}")
+                dst_index = os.path.join(out_dir, "features.rvci")
+                prepare_index(index_files[0], dst_index)
         else:
             sys.exit(1)
 

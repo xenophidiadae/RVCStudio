@@ -8,7 +8,7 @@ binaries = []
 hiddenimports = []
 
                                                                
-for pkg in ["torch", "onnx", "onnxscript", "ml_dtypes"]:
+for pkg in ["torch", "onnx", "onnxscript", "ml_dtypes", "faiss"]:
     d, b, h = collect_all(pkg)
     datas += d
     binaries += b
@@ -31,6 +31,7 @@ excluded_modules = [
     "torch.testing",
     "torch.utils.benchmark",
     "torch.cuda",
+    "faiss.contrib",
     "pytest",
 ]
 

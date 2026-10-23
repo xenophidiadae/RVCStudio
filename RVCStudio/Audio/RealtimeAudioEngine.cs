@@ -44,6 +44,7 @@ public sealed class RealtimeAudioEngine : IDisposable
     private float _outputGateGain;
     private int _noiseGateOpen;
     private int _pitchShift;
+    private float _indexRate = 0.75f;
     private Exception? _workerError;
     private long _inputCallbacks;
     private long _inputBlocksQueued;
@@ -95,6 +96,7 @@ public sealed class RealtimeAudioEngine : IDisposable
     public float LastInputRms => Volatile.Read(ref _lastInputRms);
     public float LastOutputRms => Volatile.Read(ref _lastOutputRms);
     public int PitchShiftSemitones { get => _pitchShift; set => Volatile.Write(ref _pitchShift, value); }
+    public float IndexRate { get => Volatile.Read(ref _indexRate); set => Volatile.Write(ref _indexRate, Math.Clamp(value, 0f, 1f)); }
 
     public void Start()
     {
@@ -258,7 +260,7 @@ public sealed class RealtimeAudioEngine : IDisposable
                 }
 
                 var inferenceTimer = Stopwatch.StartNew();
-                var converted = _pipeline.Convert(block.Samples, Volatile.Read(ref _pitchShift));
+                var converted = _pipeline.Convert(block.Samples, Volatile.Read(ref _pitchShift), Volatile.Read(ref _indexRate));
                 inferenceTimer.Stop();
                 Interlocked.Exchange(ref _lastInferenceMilliseconds, inferenceTimer.ElapsedMilliseconds);
                 Interlocked.Increment(ref _inferenceBlocks);

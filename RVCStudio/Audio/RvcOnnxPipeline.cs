@@ -51,6 +51,7 @@ public sealed class RvcOnnxPipeline : IDisposable
     private readonly List<NamedOnnxValue> _pitchInputs = new(1);
     private readonly List<NamedOnnxValue> _generatorInputs = new(7);
     private readonly Random _noiseRandom = new(17391);
+    private readonly RvcFeatureIndex? _featureIndex;
     private bool _hasTail;
 
     public RvcOnnxPipeline(string modelDirectory, string systemModelsDirectory)
@@ -64,8 +65,8 @@ public sealed class RvcOnnxPipeline : IDisposable
                     && !string.Equals(Path.GetFileName(path), "rmvpe.onnx", StringComparison.OrdinalIgnoreCase)) ?? generatorPath;
         if (!File.Exists(contentPath) || !File.Exists(generatorPath))
             throw new FileNotFoundException(
-                $"Не найдены обязательные модели: '{contentPath}' и/или ONNX-генератор в '{modelDirectory}'. " +
-                "Положите ContentVec в assets/models, а целевую модель — в папку выбранной модели.");
+                $"Required models were not found: '{contentPath}' and/or an ONNX generator in '{modelDirectory}'. " +
+                "Place ContentVec in assets/models and the target model in the selected model folder.");
 
         _content = CreateSession(contentPath);
         _generator = CreateSession(generatorPath);
@@ -82,26 +83,28 @@ public sealed class RvcOnnxPipeline : IDisposable
         UsesPitch = _generatorPitchF is not null || _generatorPitch is not null;
         if (UsesPitch)
         {
-            if (!File.Exists(pitchPath)) throw new FileNotFoundException($"Генератор принимает pitch, но не найдена системная RMVPE-модель: {pitchPath}");
+            if (!File.Exists(pitchPath)) throw new FileNotFoundException($"The generator requires pitch input, but the RMVPE model was not found: {pitchPath}");
             _pitch = CreateSession(pitchPath);
             _pitchInput = FindOptionalInput(_pitch, "waveform") ?? _pitch.InputMetadata.Keys.First();
         }
         _generatorOutput = _generator.OutputMetadata.Keys.First();
 
         if (_generatorSpeaker is null)
-            throw new InvalidDataException("Не найден вход speaker/ds в ONNX генераторе.");
+            throw new InvalidDataException("The ONNX generator has no speaker/ds input.");
         var contentOutputName = FindOptionalOutput(_content, "unit12");
         var contentShape = _content.OutputMetadata[contentOutputName ?? _content.OutputMetadata.Keys.First()].Dimensions;
         _contentFrameShift = contentOutputName is not null
             ? 2
             : contentShape.Length >= 3 && contentShape[1] > 0 && contentShape[1] <= 64 ? 2 : 1;
         _outputSampleRate = ResolveOutputSampleRate(modelDirectory, _generator);
+        var preparedIndexPath = Path.Combine(modelDirectory, "features.rvci");
+        if (File.Exists(preparedIndexPath)) _featureIndex = RvcFeatureIndex.Load(preparedIndexPath);
     }
 
     public int OutputSampleRate => _outputSampleRate;
     public bool UsesPitch { get; }
 
-    public ReadOnlySpan<float> Convert(ReadOnlySpan<float> input48k, int pitchShiftSemitones)
+    public ReadOnlySpan<float> Convert(ReadOnlySpan<float> input48k, int pitchShiftSemitones, float indexRate)
     {
         ResampleTo16k(input48k, _audio16k);
         _contentInputs.Clear();
@@ -110,17 +113,17 @@ public sealed class RvcOnnxPipeline : IDisposable
         using var contentResults = _content.Run(_contentInputs);
         var featuresValue = contentResults.FirstOrDefault(x => x.Name == "unit12") ?? contentResults.First();
         var featuresTensor = featuresValue.AsTensor<float>();
-        if (featuresTensor.Dimensions.Length != 3) throw new InvalidDataException("ContentVec должен возвращать [1,T,C].");
+        if (featuresTensor.Dimensions.Length != 3) throw new InvalidDataException("ContentVec must return [1,T,C].");
         var baseFrames = featuresTensor.Dimensions[1];
         var inputFeatures = featuresTensor.Dimensions[2];
-        if (inputFeatures > 768) throw new InvalidDataException("Размерность ContentVec выше 768 не поддерживается.");
+        if (inputFeatures > 768) throw new InvalidDataException("ContentVec dimensions above 768 are not supported.");
         var generatorFeatureDims = _generator.InputMetadata[_generatorPhone].Dimensions;
         var generatorFeatureSize = generatorFeatureDims.Length >= 3 && generatorFeatureDims[^1] > 0
             ? generatorFeatureDims[^1] : inputFeatures;
         var frames = Math.Min(baseFrames * _contentFrameShift, _shiftedF0.Length);
-        if (frames < 1) throw new InvalidDataException("ContentVec вернул пустой тензор признаков.");
+        if (frames < 1) throw new InvalidDataException("ContentVec returned an empty feature tensor.");
         if (inputFeatures != generatorFeatureSize)
-            throw new InvalidDataException($"Размерность ContentVec ({inputFeatures}) не совпадает с входом генератора ({generatorFeatureSize}). Нужен соответствующий HuBERT.");
+            throw new InvalidDataException($"ContentVec dimensions ({inputFeatures}) do not match the generator input ({generatorFeatureSize}). A matching HuBERT model is required.");
         if (featuresTensor is not DenseTensor<float> denseFeatures)
             throw new InvalidDataException("ContentVec returned a tensor without a contiguous DenseTensor buffer.");
         denseFeatures.Buffer.Span.CopyTo(_rawContent);
@@ -130,6 +133,7 @@ public sealed class RvcOnnxPipeline : IDisposable
         for (var t = 0; t < frames; t++)
             Array.Copy(_rawContent, (t / _contentFrameShift) * inputFeatures,
                 _features, t * generatorFeatureSize, generatorFeatureSize);
+        _featureIndex?.Blend(_features, frames, generatorFeatureSize, indexRate);
         var frameCount = frames;
         if (UsesPitch)
         {
@@ -142,12 +146,12 @@ public sealed class RvcOnnxPipeline : IDisposable
             using var pitchResults = _pitch!.Run(_pitchInputs);
             var f0Value = pitchResults.FirstOrDefault(x => x.Name == "pitchf") ?? pitchResults.First();
             var f0Tensor = f0Value.AsTensor<float>();
-            if (f0Tensor.Length > _rawPitch.Length) throw new InvalidDataException("Число кадров RMVPE превышает поддерживаемый размер окна.");
+            if (f0Tensor.Length > _rawPitch.Length) throw new InvalidDataException("RMVPE frame count exceeds the supported window size.");
             if (f0Tensor is not DenseTensor<float> denseF0)
                 throw new InvalidDataException("RMVPE returned a tensor without a contiguous DenseTensor buffer.");
             denseF0.Buffer.Span.CopyTo(_rawPitch);
             frameCount = (int)Math.Min(frames, f0Tensor.Length);
-            if (frameCount == 0) throw new InvalidDataException("RMVPE вернул пустой F0.");
+            if (frameCount == 0) throw new InvalidDataException("RMVPE returned empty F0 data.");
         }
         var alignedFrames = frameCount;
         _generatorInputs.Clear();
@@ -216,16 +220,16 @@ public sealed class RvcOnnxPipeline : IDisposable
         using var generated = _generator.Run(_generatorInputs);
         var audio = generated.First(x => x.Name == _generatorOutput).AsTensor<float>();
         var audioArray = _outputAudio;
-        if (audio.Length > audioArray.Length) throw new InvalidDataException("Генератор вернул слишком длинный audio tensor.");
+        if (audio.Length > audioArray.Length) throw new InvalidDataException("The generator returned an oversized audio tensor.");
         if (audio is not DenseTensor<float> denseAudio)
             throw new InvalidDataException("Generator returned a tensor without a contiguous DenseTensor buffer.");
         denseAudio.Buffer.Span.CopyTo(audioArray);
         var usable = Math.Min(audio.Length / 2, (int)Math.Round(0.14 * _outputSampleRate));
-        if (usable <= 0) throw new InvalidDataException("Неожиданный размер audio из RVC.");
+        if (usable <= 0) throw new InvalidDataException("Unexpected RVC audio tensor size.");
         var start = audio.Length - usable;
         var outputLength = (int)Math.Round(usable * 48000d / _outputSampleRate);
         if (outputLength <= 0 || outputLength > _currentOutput.Length)
-            throw new InvalidDataException($"Размер выхода после ресемплинга ({outputLength}) не поддерживается.");
+            throw new InvalidDataException($"Resampled output size ({outputLength}) is not supported.");
         var fade = Math.Min(BoundaryCrossfadeSamples, outputLength);
         for (var i = 0; i < outputLength; i++)
         {
@@ -276,7 +280,7 @@ public sealed class RvcOnnxPipeline : IDisposable
     private static void ResampleTo16k(ReadOnlySpan<float> source, Span<float> destination)
     {
         if (source.Length != destination.Length * 3)
-            throw new ArgumentException("Ожидался ровно 3:1 ресемплинг 48 kHz -> 16 kHz.", nameof(source));
+            throw new ArgumentException("Expected exactly 3:1 resampling from 48 kHz to 16 kHz.", nameof(source));
         for (var i = 0; i < destination.Length; i++)
         {
             var sourceIndex = i * 3;
@@ -299,8 +303,7 @@ public sealed class RvcOnnxPipeline : IDisposable
 
     private static InferenceSession CreateSession(string modelPath)
     {
-        var cudaEnabled = string.Equals(Environment.GetEnvironmentVariable("RVC_ENABLE_CUDA"), "1", StringComparison.Ordinal);
-        if (cudaEnabled && (OperatingSystem.IsLinux() || OperatingSystem.IsWindows()))
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsWindows())
         {
             try
             {
@@ -308,11 +311,9 @@ public sealed class RvcOnnxPipeline : IDisposable
                 gpuOptions.AppendExecutionProvider_CUDA(0);
                 return new InferenceSession(modelPath, gpuOptions);
             }
-            catch (Exception ex) when (ex is OnnxRuntimeException or DllNotFoundException or EntryPointNotFoundException)
+            catch (Exception ex) when (ex is OnnxRuntimeException or DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
             {
-                throw new InvalidOperationException(
-                    "RVC_ENABLE_CUDA=1, but ONNX Runtime CUDA provider failed to initialize. " +
-                    "Check CUDA 12/cuDNN libraries and LD_LIBRARY_PATH; refusing a silent CPU fallback.", ex);
+                Console.Error.WriteLine($"CUDA is unavailable for '{Path.GetFileName(modelPath)}'; falling back to CPU: {ex.Message}");
             }
         }
         using var cpuOptions = new SessionOptions { GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL };

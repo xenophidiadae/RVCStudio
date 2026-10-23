@@ -26,8 +26,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty] public partial string StatusMessage { get; set; } = "";
     [ObservableProperty] public partial string AudioStatus { get; set; } = "";
     [ObservableProperty] public partial int PitchShift { get; set; }
+    [ObservableProperty] public partial double IndexRate { get; set; } = 0.75;
     [ObservableProperty] public partial bool IsVoiceChanging { get; set; }
-    public string VoiceChangerButtonText => IsVoiceChanging ? "Остановить voice changer" : "Запустить voice changer";
+    public string VoiceChangerButtonText => IsVoiceChanging ? "Stop voice conversion" : "Start voice conversion";
 
     partial void OnIsVoiceChangingChanged(bool value) => OnPropertyChanged(nameof(VoiceChangerButtonText));
 
@@ -51,6 +52,11 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         if (_audioEngine is not null) _audioEngine.PitchShiftSemitones = value;
     }
 
+    partial void OnIndexRateChanged(double value)
+    {
+        if (_audioEngine is not null) _audioEngine.IndexRate = (float)value;
+    }
+
     [RelayCommand]
     private async Task BrowseModel()
     {
@@ -59,9 +65,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         if (window is null) return;
         var files = await window.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = "Выберите ZIP-архив RVC-модели",
+            Title = "Select an RVC model archive",
             AllowMultiple = false,
-            FileTypeFilter = [new FilePickerFileType("ZIP архив") { Patterns = ["*.zip"] }]
+            FileTypeFilter = [new FilePickerFileType("ZIP archive") { Patterns = ["*.zip"] }]
         });
         if (files.Count > 0) await ImportArchive(files[0].TryGetLocalPath());
     }
@@ -70,7 +76,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         if (string.IsNullOrWhiteSpace(archivePath) || !File.Exists(archivePath) || !archivePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
         {
-            StatusMessage = "Нужен существующий ZIP-архив.";
+            StatusMessage = "Select an existing ZIP archive.";
             return;
         }
 
@@ -90,7 +96,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             foreach (var entry in zip.Entries)
             {
                 var target = Path.GetFullPath(Path.Combine(destination, entry.FullName));
-                if (!target.StartsWith(root, StringComparison.Ordinal)) throw new InvalidDataException("Архив содержит недопустимый путь.");
+                if (!target.StartsWith(root, StringComparison.Ordinal)) throw new InvalidDataException("The archive contains an unsafe path.");
                 if (string.IsNullOrEmpty(entry.Name)) Directory.CreateDirectory(target);
                 else
                 {
@@ -110,21 +116,28 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 var targetGenerator = Path.Combine(destination, "model.onnx");
                 if (!string.Equals(onnxInArchive, targetGenerator, StringComparison.Ordinal))
                     File.Copy(onnxInArchive, targetGenerator, overwrite: true);
+                var indexPath = Directory.EnumerateFiles(destination, "*.index", SearchOption.AllDirectories).FirstOrDefault();
+                    if (indexPath is not null)
+                {
+                    var indexConverterPath = GetConverterPath();
+                    if (!File.Exists(indexConverterPath)) throw new FileNotFoundException("The converter required to prepare the RVC index was not found.", indexConverterPath);
+                    await RunIndexPreparation(indexConverterPath, indexPath, Path.Combine(destination, "features.rvci"));
+                }
                 RefreshModels();
                 SelectedModel = Path.GetFileName(destination);
-                StatusMessage = $"ONNX-модель «{SelectedModel}» импортирована; Python-конвертация не требуется.";
+                StatusMessage = $"ONNX model '{SelectedModel}' imported. Python conversion was not needed.";
                 return;
             }
             if (pthInArchive is null)
-                throw new InvalidDataException("В ZIP нет ни голосового .pth, ни готового ONNX-генератора.");
+                throw new InvalidDataException("The ZIP contains neither an RVC .pth checkpoint nor an ONNX generator.");
 
             var converterPath = GetConverterPath();
             if (!File.Exists(converterPath))
                 throw new FileNotFoundException(
-                    $"Не найден конвертер RVC для этой системы ({Path.GetFileName(converterPath)}). " +
-                    "Переустановите приложение или соберите конвертер для текущей ОС.", converterPath);
+                    $"The RVC converter for this platform was not found ({Path.GetFileName(converterPath)}). " +
+                    "Run the setup script for this operating system.", converterPath);
 
-            StatusMessage = "Конвертация .pth в ONNX… Это может занять несколько минут.";
+            StatusMessage = "Converting .pth to ONNX… This may take a few minutes.";
             var startInfo = new ProcessStartInfo
             {
                 FileName = converterPath,
@@ -139,7 +152,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             startInfo.ArgumentList.Add(destination);
 
             using var process = Process.Start(startInfo)
-                ?? throw new InvalidOperationException("Не удалось запустить конвертер RVC.");
+                ?? throw new InvalidOperationException("Could not start the RVC converter.");
             var stdoutTask = process.StandardOutput.ReadToEndAsync();
             var stderrTask = process.StandardError.ReadToEndAsync();
             await process.WaitForExitAsync();
@@ -149,15 +162,15 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             {
                 var details = string.IsNullOrWhiteSpace(error) ? output : error;
                 throw new InvalidOperationException(string.IsNullOrWhiteSpace(details)
-                    ? $"Конвертер завершился с кодом {process.ExitCode}."
-                    : $"Конвертер не смог обработать модель: {details.Trim()}");
+                    ? $"The converter exited with code {process.ExitCode}."
+                    : $"The converter could not process the model: {details.Trim()}");
             }
             if (!File.Exists(Path.Combine(destination, $"{name}.onnx")))
-                throw new InvalidOperationException("Конвертер завершился, но ONNX-файл не был создан.");
+                throw new InvalidOperationException("The converter exited without creating an ONNX file.");
 
             RefreshModels();
             SelectedModel = Path.GetFileName(destination);
-            StatusMessage = $"Модель «{SelectedModel}» добавлена и сконвертирована в ONNX.";
+            StatusMessage = $"Model '{SelectedModel}' was imported and converted to ONNX.";
         }
         catch (Exception ex)
         {
@@ -168,9 +181,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             }
             catch (IOException cleanupError)
             {
-                StatusMessage = $"Не удалось очистить незавершённую модель: {cleanupError.Message}";
+                StatusMessage = $"Could not clean up the incomplete model: {cleanupError.Message}";
             }
-            StatusMessage = $"Не удалось импортировать архив: {ex.Message}";
+            StatusMessage = $"Could not import archive: {ex.Message}";
         }
     }
 
@@ -180,6 +193,26 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         var fileName = OperatingSystem.IsWindows() ? "rvc-converter.exe" : "rvc-converter";
         var platformPath = Path.Combine(_applicationDirectory, "converter", "dist", platformDirectory, fileName);
         return File.Exists(platformPath) ? platformPath : Path.Combine(_applicationDirectory, "converter", "dist", fileName);
+    }
+
+    private static async Task RunIndexPreparation(string converterPath, string indexPath, string outputPath)
+    {
+        var info = new ProcessStartInfo
+        {
+            FileName = converterPath, WorkingDirectory = Path.GetDirectoryName(converterPath)!,
+            UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true
+        };
+        info.ArgumentList.Add("--prepare-index");
+        info.ArgumentList.Add(indexPath);
+        info.ArgumentList.Add(outputPath);
+        using var process = Process.Start(info) ?? throw new InvalidOperationException("Could not start RVC index preparation.");
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        var output = await stdout;
+        var error = await stderr;
+        if (process.ExitCode != 0)
+            throw new InvalidOperationException($"Could not prepare the RVC index: {(string.IsNullOrWhiteSpace(error) ? output : error).Trim()}");
     }
 
     private void RefreshModels()
@@ -205,10 +238,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             SelectedInputDevice = InputDevices.FirstOrDefault();
             SelectedOutputDevice = OutputDevices.FirstOrDefault();
             AudioStatus = InputDevices.Count == 0 || OutputDevices.Count == 0
-                ? "Некоторые устройства не найдены. Подключите их и перезапустите приложение."
-                : "Список устройств получен из системы. Для обновления подключите устройства и перезапустите приложение.";
+                ? "Some devices were not found. Connect them and restart the app."
+                : "Devices loaded from the system. Restart the app after connecting another device.";
         }
-        catch (Exception ex) { AudioStatus = $"Не удалось получить аудио устройства: {ex.Message}"; }
+        catch (Exception ex) { AudioStatus = $"Could not enumerate audio devices: {ex.Message}"; }
     }
 
     [RelayCommand]
@@ -223,23 +256,24 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         try
         {
             if (string.IsNullOrWhiteSpace(SelectedModel))
-                throw new InvalidOperationException("Сначала импортируйте и выберите модель.");
+                throw new InvalidOperationException("Import and select a model first.");
             var modelDir = Path.Combine(_modelsDirectory, SelectedModel);
             if (SelectedInputDevice is not { } inputDevice)
-                throw new InvalidOperationException("Выберите устройство ввода.");
+                throw new InvalidOperationException("Select an input device.");
             if (SelectedOutputDevice is not { } outputDevice)
-                throw new InvalidOperationException("Выберите устройство вывода.");
+                throw new InvalidOperationException("Select an output device.");
             var systemModelsDir = Path.Combine(_applicationDirectory, "assets", "models");
             _audioEngine = new RealtimeAudioEngine(modelDir, systemModelsDir, inputDevice.Id, outputDevice.Id)
             {
-                PitchShiftSemitones = PitchShift
+                PitchShiftSemitones = PitchShift,
+                IndexRate = (float)IndexRate
             };
             _audioEngine.Start();
             _lastReportedUnderrunCallbacks = 0;
             _lastReportedUnderrunFrames = 0;
             IsVoiceChanging = true;
-            AudioStatus = $"Realtime запущен · input #{inputDevice.Id}: {inputDevice.Name} · " +
-                          $"output #{outputDevice.Id}: {outputDevice.Name} · собираю метрики…";
+            AudioStatus = $"Starting realtime · input #{inputDevice.Id}: {inputDevice.Name} · " +
+                          $"output #{outputDevice.Id}: {outputDevice.Name} · collecting metrics…";
             _audioDiagnosticsTimer?.Dispose();
             _audioDiagnosticsTimer = new Timer(_ => UpdateAudioDiagnostics(), null, 1000, 1000);
         }
@@ -248,7 +282,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             _audioEngine?.Dispose();
             _audioEngine = null;
             IsVoiceChanging = false;
-            AudioStatus = $"Не удалось запустить realtime: {ex.Message}";
+            AudioStatus = $"Could not start realtime conversion: {ex.Message}";
         }
     }
 
@@ -257,10 +291,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         _audioDiagnosticsTimer?.Dispose();
         _audioDiagnosticsTimer = null;
         try { _audioEngine?.Dispose(); }
-        catch (Exception ex) { AudioStatus = $"Ошибка остановки аудио: {ex.Message}"; }
+        catch (Exception ex) { AudioStatus = $"Audio shutdown error: {ex.Message}"; }
         _audioEngine = null;
         IsVoiceChanging = false;
-        if (string.IsNullOrEmpty(AudioStatus)) AudioStatus = "Realtime voice changer остановлен.";
+        if (string.IsNullOrEmpty(AudioStatus)) AudioStatus = "Realtime voice conversion stopped.";
     }
 
     public void Dispose()
@@ -276,10 +310,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         {
             if (!ReferenceEquals(engine, _audioEngine)) return;
             AudioStatus = engine.WorkerError is { } workerError
-                ? $"Ошибка ONNX worker: {workerError.Message}"
+                ? $"ONNX worker error: {workerError.Message}"
                 : $"Realtime · input RMS {engine.LastInputRms:F4} · output RMS {engine.LastOutputRms:F4} · " +
-                  $"inferences {engine.InferenceBlocks} · последняя {engine.LastInferenceMilliseconds} ms · " +
-                  $"underrun/s {engine.OutputUnderrunCallbacks - _lastReportedUnderrunCallbacks} callbacks, " +
+                  $"inferences {engine.InferenceBlocks} · last {engine.LastInferenceMilliseconds} ms · " +
+                  $"underruns/s {engine.OutputUnderrunCallbacks - _lastReportedUnderrunCallbacks} callbacks, " +
                   $"{engine.OutputUnderrunFrames - _lastReportedUnderrunFrames} silent frames";
             _lastReportedUnderrunCallbacks = engine.OutputUnderrunCallbacks;
             _lastReportedUnderrunFrames = engine.OutputUnderrunFrames;

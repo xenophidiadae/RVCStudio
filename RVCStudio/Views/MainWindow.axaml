@@ -3,86 +3,106 @@
         xmlns:vm="using:RVCStudio.ViewModels"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="720"
+        mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="680"
         x:Class="RVCStudio.Views.MainWindow"
         x:DataType="vm:MainViewModel"
-        Title="RVC Studio" Width="1000" Height="720"
-        Background="#0B1020">
-    <Design.DataContext>
-        <vm:MainViewModel />
-    </Design.DataContext>
+        Title="RVC Studio" Width="900" Height="680" MinWidth="760" MinHeight="600"
+        Background="#101113">
     <Window.Styles>
-        <Style Selector="TextBlock">
-            <Setter Property="Foreground" Value="#F1F5F9" />
-        </Style>
+        <Style Selector="TextBlock"><Setter Property="Foreground" Value="#ECEDEF" /></Style>
         <Style Selector="ComboBox">
-            <Setter Property="Background" Value="#151D30" />
-            <Setter Property="Foreground" Value="#F1F5F9" />
-            <Setter Property="BorderBrush" Value="#293750" />
+            <Setter Property="Background" Value="#1A1B1E" />
+            <Setter Property="Foreground" Value="#ECEDEF" />
+            <Setter Property="BorderBrush" Value="#303136" />
+            <Setter Property="MinHeight" Value="40" />
         </Style>
         <Style Selector="Button">
-            <Setter Property="Background" Value="#7C5CFC" />
-            <Setter Property="Foreground" Value="White" />
-            <Setter Property="Padding" Value="16,10" />
-            <Setter Property="CornerRadius" Value="9" />
+            <Setter Property="Background" Value="#D7F36A" />
+            <Setter Property="Foreground" Value="#17190F" />
+            <Setter Property="Padding" Value="16,11" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style Selector="Button.secondary">
+            <Setter Property="Background" Value="#252629" />
+            <Setter Property="Foreground" Value="#ECEDEF" />
+            <Setter Property="BorderBrush" Value="#36373B" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+        <Style Selector="Slider">
+            <Setter Property="Foreground" Value="#D7F36A" />
         </Style>
     </Window.Styles>
     <ScrollViewer>
-        <StackPanel Margin="48" Spacing="26" MaxWidth="820" HorizontalAlignment="Center">
-            <StackPanel Spacing="7">
-                <TextBlock Text="RVC STUDIO" Foreground="#A78BFA" FontSize="12" FontWeight="Bold" />
-                <TextBlock Text="Голосовая лаборатория" FontSize="32" FontWeight="Bold" />
-                <TextBlock Text="Добавьте модель и настройте аудио устройства для работы." Foreground="#94A3B8" FontSize="15" />
-            </StackPanel>
-
-            <Border Background="#111A2B" BorderBrush="#25324A" BorderThickness="1" CornerRadius="16" Padding="24">
-                <StackPanel Spacing="17">
-                    <StackPanel Spacing="4">
-                        <TextBlock Text="Библиотека моделей" FontSize="19" FontWeight="SemiBold" />
-                        <TextBlock Text="Перетащите ZIP-архив с RVC-моделью — он будет распакован в папку Models." Foreground="#94A3B8" TextWrapping="Wrap" />
-                    </StackPanel>
-                    <Border Name="DropZone" Background="#151D30" BorderBrush="#7C5CFC" BorderThickness="1" CornerRadius="12" Padding="28" MinHeight="150" DragDrop.AllowDrop="True" DragDrop.DragOver="OnDragOver" DragDrop.Drop="OnDrop">
-                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8">
-                            <TextBlock Text="⇧" FontSize="30" HorizontalAlignment="Center" Foreground="#A78BFA" />
-                            <TextBlock Text="Перетащите ZIP-файл сюда" FontSize="17" FontWeight="SemiBold" HorizontalAlignment="Center" />
-                            <TextBlock Text="или выберите архив на компьютере" Foreground="#94A3B8" HorizontalAlignment="Center" />
-                            <Button Content="Выбрать ZIP-файл…" Command="{Binding BrowseModelCommand}" Margin="0,8,0,0" />
+        <Grid Margin="24" MaxWidth="820" HorizontalAlignment="Center" VerticalAlignment="Center">
+            <Grid ColumnDefinitions="1.05*,1.25*" ColumnSpacing="16">
+                <Border Grid.Column="0" Background="#18191C" BorderBrush="#2C2D31" BorderThickness="1" CornerRadius="12" Padding="20">
+                    <StackPanel Spacing="17">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="01  /  MODEL" Foreground="#D7F36A" FontSize="10" FontWeight="Bold" />
+                            <TextBlock Text="Voice model" FontSize="19" FontWeight="SemiBold" />
+                            <TextBlock Text="Import an RVC model archive or select one already installed." Foreground="#92949A" FontSize="12" TextWrapping="Wrap" />
                         </StackPanel>
-                    </Border>
-                    <TextBlock Text="{Binding StatusMessage}" Foreground="#A78BFA" TextWrapping="Wrap" />
-                    <StackPanel Spacing="8">
-                        <TextBlock Text="Активная модель" FontWeight="SemiBold" />
-                        <ComboBox ItemsSource="{Binding Models}" SelectedItem="{Binding SelectedModel}" PlaceholderText="Сначала добавьте модель" />
+                        <Border Name="DropZone" Background="#202125" BorderBrush="#3A3B40" BorderThickness="1" CornerRadius="9" Padding="18" MinHeight="150" DragDrop.AllowDrop="True" DragDrop.DragOver="OnDragOver" DragDrop.Drop="OnDrop">
+                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="9">
+                                <TextBlock Text="Drop a ZIP model here" FontSize="15" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                                <TextBlock Text="ONNX models are used directly; .pth models are converted on import." Foreground="#92949A" FontSize="11" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="240" />
+                                <Button Classes="secondary" Content="Browse files" Command="{Binding BrowseModelCommand}" Margin="0,3,0,0" />
+                            </StackPanel>
+                        </Border>
+                        <TextBlock Text="{Binding StatusMessage}" Foreground="#D7F36A" FontSize="11" TextWrapping="Wrap" />
+                        <StackPanel Spacing="7">
+                            <TextBlock Text="Selected model" FontSize="12" Foreground="#B9BBC0" />
+                            <ComboBox ItemsSource="{Binding Models}" SelectedItem="{Binding SelectedModel}" PlaceholderText="No model selected" />
+                        </StackPanel>
+                        <Border Background="#202125" CornerRadius="8" Padding="12">
+                            <StackPanel Spacing="5">
+                                <TextBlock Text="MODEL STORAGE" Foreground="#92949A" FontSize="9" FontWeight="Bold" />
+                                <TextBlock Text="Models/" FontFamily=" monospace" FontSize="12" />
+                                <TextBlock Text="Your model files stay on this device." Foreground="#92949A" FontSize="10" />
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
-                </StackPanel>
-            </Border>
+                </Border>
 
-            <Border Background="#111A2B" BorderBrush="#25324A" BorderThickness="1" CornerRadius="16" Padding="24">
-                <StackPanel Spacing="18">
-                    <StackPanel Spacing="4">
-                        <TextBlock Text="Аудио устройства" FontSize="19" FontWeight="SemiBold" />
-                        <TextBlock Text="Выберите микрофон и устройство воспроизведения." Foreground="#94A3B8" />
-                    </StackPanel>
-                    <Grid ColumnDefinitions="*,*" ColumnSpacing="18">
-                        <StackPanel Grid.Column="0" Spacing="8">
-                            <TextBlock Text="Ввод · микрофон" FontWeight="SemiBold" />
+                <Border Grid.Column="1" Background="#18191C" BorderBrush="#2C2D31" BorderThickness="1" CornerRadius="12" Padding="20">
+                    <StackPanel Spacing="17">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="02  /  INPUT &amp; OUTPUT" Foreground="#D7F36A" FontSize="10" FontWeight="Bold" />
+                            <TextBlock Text="Audio routing" FontSize="19" FontWeight="SemiBold" />
+                            <TextBlock Text="Choose a microphone and a monitoring output." Foreground="#92949A" FontSize="12" />
+                        </StackPanel>
+                        <StackPanel Spacing="7">
+                            <TextBlock Text="Microphone" FontSize="12" Foreground="#B9BBC0" />
                             <ComboBox ItemsSource="{Binding InputDevices}" SelectedItem="{Binding SelectedInputDevice}" DisplayMemberBinding="{Binding Name}" />
                         </StackPanel>
-                        <StackPanel Grid.Column="1" Spacing="8">
-                            <TextBlock Text="Вывод · динамики / наушники" FontWeight="SemiBold" />
+                        <StackPanel Spacing="7">
+                            <TextBlock Text="Output device" FontSize="12" Foreground="#B9BBC0" />
                             <ComboBox ItemsSource="{Binding OutputDevices}" SelectedItem="{Binding SelectedOutputDevice}" DisplayMemberBinding="{Binding Name}" />
                         </StackPanel>
-                    </Grid>
-                     <TextBlock Text="{Binding AudioStatus}" Foreground="#94A3B8" FontSize="12" TextWrapping="Wrap" />
-                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
-                        <TextBlock Grid.Column="0" Text="Pitch shift · полутоны" VerticalAlignment="Center" />
-                        <Slider Grid.Column="1" Minimum="-12" Maximum="12" TickFrequency="1" IsSnapToTickEnabled="True" Value="{Binding PitchShift}" />
-                        <TextBlock Grid.Column="2" Text="{Binding PitchShift}" VerticalAlignment="Center" MinWidth="30" />
-                    </Grid>
-                    <Button Content="{Binding VoiceChangerButtonText}" Command="{Binding ToggleVoiceChangingCommand}" />
-                </StackPanel>
-            </Border>
-            <TextBlock Text="Модели хранятся локально на этом компьютере." Foreground="#64748B" FontSize="12" HorizontalAlignment="Center" />
-        </StackPanel>
+                        <Border Background="#202125" CornerRadius="8" Padding="11">
+                            <TextBlock Text="{Binding AudioStatus}" Foreground="#92949A" FontSize="10" TextWrapping="Wrap" />
+                        </Border>
+                        <StackPanel Spacing="6">
+                            <Grid ColumnDefinitions="*,Auto">
+                                <TextBlock Text="Pitch shift" FontSize="12" Foreground="#B9BBC0" />
+                                <TextBlock Grid.Column="1" Text="{Binding PitchShift, StringFormat='{}{0:+#;-#;0} st'}" FontSize="12" />
+                            </Grid>
+                            <Slider Minimum="-12" Maximum="12" TickFrequency="1" IsSnapToTickEnabled="True" Value="{Binding PitchShift}" />
+                        </StackPanel>
+                        <StackPanel Spacing="6">
+                            <Grid ColumnDefinitions="*,Auto">
+                                <TextBlock Text="Index blend" FontSize="12" Foreground="#B9BBC0" />
+                                <TextBlock Grid.Column="1" Text="{Binding IndexRate, StringFormat='{}{0:P0}'}" FontSize="12" />
+                            </Grid>
+                            <Slider Minimum="0" Maximum="1" TickFrequency="0.05" Value="{Binding IndexRate}" />
+                            <TextBlock Text="Controls how strongly the model's retrieval index affects the voice." Foreground="#777980" FontSize="10" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <Button Content="{Binding VoiceChangerButtonText}" Command="{Binding ToggleVoiceChangingCommand}" Margin="0,3,0,0" />
+                        <TextBlock Text="CUDA is preferred when available; CPU is used as a fallback." Foreground="#777980" FontSize="10" TextWrapping="Wrap" HorizontalAlignment="Center" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Grid>
     </ScrollViewer>
 </Window>

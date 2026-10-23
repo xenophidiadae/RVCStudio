@@ -1,0 +1,25 @@
+# .NET build and IDE files
+**/bin/
+**/obj/
+.vs/
+.idea/
+*.user
+*.suo
+
+# Python environments and build artifacts
+**/.venv/
+**/.venv-*/
+**/venv/
+**/__pycache__/
+*.py[cod]
+RVCStudio/converter/build/
+RVCStudio/converter/dist/
+
+# Downloaded model weights (keep license/notice and source documentation)
+RVCStudio/assets/models/*.onnx
+RVCStudio/assets/models/*.part
+
+# Publish and packaging outputs
+publish/
+artifacts/
+*.log
