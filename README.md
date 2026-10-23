@@ -1,79 +1,52 @@
 # RVC Studio
 
-RVC Studio — desktop-приложение для realtime-конвертации голоса на базе RVC и ONNX. Интерфейс позволяет импортировать RVC-модель из ZIP, выбрать аудиоустройства и настроить сдвиг высоты тона.
+**RVC Studio is a desktop voice changer that converts your microphone input into another voice in real time using RVC (Retrieval-based Voice Conversion) models.** Choose a voice model, select an input and output device, adjust the pitch shift, and start the voice changer. Audio is processed locally on your computer; the app does not train models or provide voice models.
 
-> Проект в разработке. Для работы нужны совместимая RVC ONNX-модель и базовые ONNX-модели ContentVec/RMVPE.
+> **Beta:** RVC Studio is still in beta
 
-## Быстрый запуск
+## How it works
 
-### Windows
+RVC Studio captures audio from the selected microphone, analyzes speech, runs it through the selected RVC voice model, and plays the converted audio through the selected output device. You can route that output to headphones, speakers, or a virtual audio cable for use in another app.
 
-1. Установите [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
-2. Откройте PowerShell в папке проекта и выполните:
+The app is built with C# and .NET 10. Avalonia provides the desktop UI, PortAudio handles audio capture and playback, and ONNX Runtime runs the neural networks. The conversion pipeline uses ContentVec to extract speech features, an RVC generator to synthesize the target voice, and RMVPE for pitch detection when required by the selected model. Inference runs on the CPU by default; CUDA acceleration is available on supported Windows and Linux systems with a compatible CUDA environment.
 
-   ```powershell
-   .\scripts\setup.ps1
-   .\scripts\run.ps1
-   ```
+Audio capture and model inference run on separate threads, connected by short queues of audio blocks. This keeps model processing out of the real-time audio callback and helps limit latency. The app also smooths audio block boundaries to reduce clicks and gaps.
 
-Либо запустите `run.bat` двойным щелчком (после установки .NET SDK).
+## Adding a voice model
 
-### Linux
+Drag and drop a model ZIP into the app or use the file picker. The archive can contain either a compatible RVC generator in ONNX format or an RVC v2 `.pth` checkpoint. ONNX models are imported directly; `.pth` checkpoints are converted to ONNX by the bundled converter. Imported models are stored in the `Models` folder next to the app.
 
-1. Установите [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0), PortAudio и `curl`.
-2. Выполните из корня проекта:
+RVC Studio does not include a target voice model. You must provide one yourself and follow its license and usage terms. The ContentVec and RMVPE support models are downloaded during setup into `RVCStudio/assets/models/` (about 707 MiB total).
 
-   ```bash
-   ./scripts/setup.sh
-   ./scripts/run.sh
-   ```
+## Project layout
 
-Пакеты PortAudio: Debian/Ubuntu — `sudo apt install libportaudio2`; Fedora — `sudo dnf install portaudio`.
+- `RVCStudio/` — Avalonia desktop app, user interface, audio engine, and ONNX inference pipeline.
+- `RVCStudio/converter/` — source and build scripts for converting RVC v2 `.pth` checkpoints to ONNX.
+- `RVCStudio/assets/models/` — downloaded ContentVec/RMVPE support models and third-party notices.
+- `scripts/` — setup and run scripts for Windows and Linux.
 
-Установщик скачивает **обе необходимые базовые модели — `contentvec.onnx` и `rmvpe.onnx`** — в `RVCStudio/assets/models/` и проверяет их SHA-256. Размер загрузки около 707 MiB. Установить модели отдельно, не запуская настройку приложения:
+## Installation
 
-```bash
-# Linux
-./scripts/install-models.sh
-```
+Install the **.NET 10 SDK** first. On Linux, also install PortAudio and `curl` (Debian/Ubuntu: `sudo apt install libportaudio2 curl`). Run setup from the repository root; it downloads the support models and restores the .NET dependencies.
+
+**Windows (PowerShell):**
 
 ```powershell
-# Windows PowerShell
-.\scripts\install-models.ps1
+.\scripts\setup.ps1
+.\scripts\run.ps1
 ```
 
-Установка моделей также выполняется автоматически командами `scripts/setup.sh` и `scripts/setup.ps1`.
-
-## Сборка и публикация
+**Linux:**
 
 ```bash
-dotnet restore RVCStudio.sln
-dotnet build RVCStudio.sln -c Release
+./scripts/setup.sh
+./scripts/run.sh
 ```
 
-Публикация автономной папки для Linux x64:
+After setup, use the `run` script to start the app again. For a Release build, run `dotnet build RVCStudio.sln -c Release`.
 
-```bash
-dotnet publish RVCStudio/RVCStudio.csproj -c Release -r linux-x64 --self-contained true -o publish/linux-x64
-```
+## Licensing
 
-Для Windows замените RID на `win-x64` (или `win-arm64`). Для GPU-ускорения требуется совместимая CUDA-среда.
-
-## Добавление голосовой модели
-
-Перетащите ZIP-архив модели в окно приложения или нажмите «Выбрать ZIP-файл». Архив должен содержать совместимую RVC generator-модель ONNX. Модели пользователя хранятся в `Models` рядом с приложением.
-
-
-## Структура проекта
-
-- `RVCStudio/` — приложение Avalonia, аудиодвижок и UI.
-- `RVCStudio/converter/` — исходный код и сборка конвертера RVC `.pth` → ONNX.
-- `RVCStudio/assets/models/` — общие модели ContentVec/RMVPE и notices.
-- `download-models.sh`, `download-models.ps1` — загрузка базовых моделей.
-- `scripts/` — настройка, запуск и публикация.
-
-Откройте `RVCStudio.sln` в Rider/Visual Studio или запустите `dotnet run --project RVCStudio/RVCStudio.csproj`.
-
-## Лицензии
-
-Проверяйте лицензии зависимостей и сторонних моделей перед распространением сборок. Лицензия и происхождение ContentVec/RMVPE приведены в `RVCStudio/assets/models/THIRD_PARTY_NOTICES.md` и README моделей. Пользовательские RVC-модели могут иметь отдельные условия распространения.
+=======
+Check the licenses of dependencies and models before redistributing the app. Third-party model notices are in `RVCStudio/assets/models/THIRD_PARTY_NOTICES.md`; user-provided voice models may have separate terms.
+=======
