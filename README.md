@@ -2,7 +2,7 @@
 
 RVC Studio is a local, real-time voice conversion desktop application built with Avalonia and ONNX Runtime. It captures microphone audio, runs it through an RVC model, and sends the converted signal to a selected output device. Audio and voice models stay on the user's machine.
 
-> This project is under active development. You need a compatible RVC model and the ContentVec/RMVPE base models. RVC Studio does not ship user voice models.
+> This project is under active development. You need a compatible RVC model and the ContentVec/RMVPE base models.
 
 ## Features
 
